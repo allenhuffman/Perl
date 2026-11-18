@@ -1,74 +1,43 @@
 #!/usr/bin/perl
 
-###########################################
-#   Boderlines v1.0 by Allen C. Huffman   #
-# Copyright (C) 2001 by Sub-Etha Software #
-#                FREEWARE!                #
-#            subetha@pobox.com            #
-#      http://disneyfans.com/subetha      #
-###########################################
 #
-# You may do whatever you want with this code, provided you put a comment in that
-# says "Baseed on" (or similar) and my original copyright notice above.
+# max number of borderlines to story
 #
-# Revision History:
-#
-# 2001/08/04 1.0 Initial (working) version.
-#
+$max = 5;
 
 #
-# Max number of borderlines to store.
+# where do we send the user when they are done playing?
 #
-$max = 10;
+$return_URL = "http://atthefaire.com/index.htm";
 
 #
-# Where do we send the user when they are done?  This can also be passed in
-# from a form using a hidden field with a name of "returnURL" and the
-# value set to the page such as "value=http://yourdomain.com/yourpage.htm".
+# if you want to count how many play the game, specify
+# a path to the count data file here, else leave it empty.
 #
-$return_URL = "http://yourdomain.com/yourpage.htm";
+$datafile_path = "borderlines.dat";
 
 #
-# Specify the path/name to where the borderline data file will be stored.
-#
-$datafile_path = "seborderlines.dat";
-
-#
-# Location/name of this script... Hopefully you won't have to change
-# this, but if you do it should be something like "/cgi-bin/seborderlines.cgi"
-# or wherever your script is and whatever it is called...
+# location/name of this script ... hopefully you won't have to change
+# this, but if you do it should be something like "/cgi-bin/guessgame.cgi"
+# or wherver your script is and whatever it is called...
 #
 $this_script = "$ENV{'SCRIPT_NAME'}";
 
 ####################################################################################
 #
-# Begin processing... Nothing below this line needs to be modified.
+# begin processing... nothing below this line needs to be modified
 #
-
-# parse any items passed in by a form or as parameters or something
 &ReadParse;
 
-# see if we have a special mode to work with
+# see if we have a special mode to work with...
 $mode = $in{'mode'};
 
-# If they pass one in from a form, we'll use it instead
-$returnURL = $in{'returnURL'};
-if ( $returnURL ) {
-	$return_URL = $returnURL;
-}
-
-#
-# If no parameters then just show a random borderline.
-#
+# if no input, then just show a borderline
 if (!$in)
 {
-	print "Content-Type: text/html\n\n";
+	open( FILE,$datafile_path) || die ("Unable to open file.\n" );
 
-	# open the data file
-	unless ( open(FILE, $datafile_path) ) {
-		print "There are no borderlines, yet.";
-		exit(0);
-	}
+	print "Content-Type: text/html\n\n";
 
 	# read borderlines into an array
 	@borderlines = <FILE>;
@@ -77,64 +46,37 @@ if (!$in)
 	$entries = scalar(@borderlines);
 	
 	# print a random borderline
-	$random = int(rand($entries));	# 1.1 removed +1 since arrays are base 0
-	$line = @borderlines[$random];
-
-	# get rid of IP address in front of borderline
-	($ipaddr, $message) = split( /\|/, $line, 2);
+	$random = int(rand($entries))+1;
+	my $subset = @borderlines[$random];
 	
-	# print the borderline
-	print $message;
-
-	# close the file
+	print "<div>$subset</div>\n";
+	
 	close(FILE);
 
-	# then we exit
 	exit(0);
 }
 
-#
-# mode=sysop
-#
-# SysOp "view all" mode.  This generates a full HTML page.
-# In the future this will have the ability to edit or delete entries.
-#
-if ($mode eq "sysop")
-{
-	&do_top;
-
-	# 1==sysop mode	
-	&do_showborderlines(1);
-	
-	&do_end;
-	
-	exit(0);
-}
-
-#
-# mode=view
-# Thise mode is for showing the borderline listing inline.
-#
-if ($mode eq "view")
-{
-	print "Content-Type: text/html\n\n";
-	
-	&do_showborderlines;
-
-	exit(0);
-}
-
-#
-# mode=add
-# List borderlines and allow adding a new one. This generates a full HTML page.
-#
 if ($mode eq "add")
 {
 	&do_top;
 	
 	print "<p align=\"center\">Welcome to Sub-Etha Software's BORDERLINES!</p>\n";
 
-	&do_showborderlines;
+	open( FILE,$datafile_path) || die ("Unable to open file.\n" );
+
+	# read borderlines into an array
+	@borderlines = <FILE>;
+
+	$entries = scalar(@borderlines);
+	
+	print "<p>There are $entries borderlines right now:</p>\n";
+	
+	$count=0;
+	foreach $line ( @borderlines ) {
+		$count++;
+		print "<div>$count. $line</div>\n";
+	}
+	close(FILE);
 	
 	&do_form;
 	
@@ -147,16 +89,12 @@ if ($mode eq "add")
 }
 
 #
-# If we have a message passed in, place it in the borderline file.
+# if we have a message, place it in the borderline file
 #
 
 # get the user's borderline message
 $message = $in{'message'};
 
-# the format will be something like this:
-#
-# message=This+is+the+message...
-#
 # get rid of invalid stuff from the message
 if ($message) {
 
@@ -167,36 +105,18 @@ if ($message) {
 	$message =~ s/<[^>]*>//g;
 }
 
-#
-# (continued)
 # okay, NOW see if we have something to put in the file...
-#
 if ($message) {
-
-	# open data file for read/write
-	if ( open(FILE, "+<$datafile_path") ) {
-
-		@borderlines = <FILE>;
-
-		# seek back to start of file
-		seek (FILE,0,0);
-
-		# erase the old junk in the file
-		truncate(FILE,0);
-
-	} else {
-		# create a new empty file if we have to
-		open( FILE,"+>$datafile_path") || die ("Unable to create file.\n" );
-	}
+	# read old group
+	open(FILE, "+<$datafile_path");
+	@borderlines = <FILE>;
 	
-	# add IP to message
-	$ip = $ENV{REMOTE_ADDR};
-	$temp = "$ip|$message";
-	$message = $temp;
-
 	# add new message to the top
 	unshift (@borderlines, $message);
 	
+	seek (FILE,0,0);
+	truncate(FILE,0);
+
 	# get rid of any excess messages (over our storage limit).
 	while ( @borderlines>$max ) {
 		pop @borderlines;
@@ -206,12 +126,13 @@ if ($message) {
 	{
 		chomp( $line );
 		print FILE "$line\n";
+	#	print "<div>$line</div>\n";
+
 	}
 	close(FILE);
-}
-
+}	
 #
-# If here, we don't know why were were called, so just redirect...
+# if here, we don't know why were were called, so just redirect...
 #
 
 # send browser to return page.
@@ -219,39 +140,6 @@ print "Location: $return_URL\n\n";
 	
 exit(0);
 
-####################################################################################
-# subroutines...
-#
-sub do_showborderlines
-{
-	# get number of arguments passed in
-	my $argc = @_;
-	my $sysop = shift @_;
-
-	unless ( open(FILE, $datafile_path) ) {
-		print "<p>There are no borderlines yet.</p>\n";
-		return;
-	}
-
-	# read borderlines into an array
-	@borderlines = <FILE>;
-
-	$entries = scalar(@borderlines);
-	
-	print "<p>There are $entries borderlines right now:</p>\n";
-	
-	$count=0;
-	foreach $line ( @borderlines ) {
-		$count++;
-		($ipaddr,$message) = split( /\|/, $line, 2);
-		print "<div>$count. ";
-		if ( $sysop ) {
-			print "[$ipaddr] ";
-		}
-		print "$message</div>\n";
-	}
-	close(FILE);
-}
 
 sub do_top
 {
@@ -274,6 +162,17 @@ print <<EOF;
 <input type="text" name="message" size="80" maxlength="80">
 <input type="submit" name="mode" value="Submit">
 <input type="submit" name="mode" value="Cancel"></div>
+</form>
+EOF
+}
+
+sub play_again
+{
+print <<EOF;
+<form action="$this_script" method="post">
+<div align="center">Would you like to play again?
+<input type="submit" name="playagain" value="Yes">
+<input type="submit" name="playagain" value="No"></div>
 </form>
 EOF
 }
