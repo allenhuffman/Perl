@@ -1,12 +1,13 @@
 #!/usr/bin/perl
 
 ###########################################
-#   Boderlines v1.0 by Allen C. Huffman   #
+#   Boderlines v1.1 by Allen C. Huffman   #
 # Copyright (C) 2001 by Sub-Etha Software #
 #                FREEWARE!                #
 #            subetha@pobox.com            #
 #      http://disneyfans.com/subetha      #
 ###########################################
+$version = "v1.1";
 #
 # You may do whatever you want with this code, provided you put a comment in that
 # says "Baseed on" (or similar) and my original copyright notice above.
@@ -14,6 +15,18 @@
 # Revision History:
 #
 # 2001/08/04 1.0 Initial (working) version.
+# 2001/08/08 1.1 Added "delete" to SysOp menu, and also added file locking.
+#                Also fixed a bug with the random output routine, but only those
+#                who downloaded v1.0 on the first day would have encountered
+#                it. The file format has also changed with the addition of a
+#                timestamp to each borderline and some other fields for future
+#                use. This version has backwards compatibility code in it.
+#
+# New 1.1 format:
+#
+# 	$ip|$timestamp|$rsvd1|$rsvd2|$message
+#
+# User messages are not allowed to contain the "|" character, or <HTML> tags.
 #
 
 #
@@ -26,7 +39,7 @@ $max = 10;
 # from a form using a hidden field with a name of "returnURL" and the
 # value set to the page such as "value=http://yourdomain.com/yourpage.htm".
 #
-$return_URL = "http://yourdomain.com/yourpage.htm";
+#$return_URL = "http://disneyfans.com/subetha/borderlines.shtml";
 
 #
 # Specify the path/name to where the borderline data file will be stored.
@@ -39,6 +52,13 @@ $datafile_path = "seborderlines.dat";
 # or wherever your script is and whatever it is called...
 #
 $this_script = "$ENV{'SCRIPT_NAME'}";
+
+#
+# To prevent multiple instances of the script running at the same time from
+# corrupting the data file, a lock method should be used. 0=no locking, 1=use
+# flock() method (which only works for Unix servers).
+#
+$flock = 1;
 
 ####################################################################################
 #
@@ -81,7 +101,12 @@ if (!$in)
 	$line = @borderlines[$random];
 
 	# get rid of IP address in front of borderline
-	($ipaddr, $message) = split( /\|/, $line, 2);
+	($ipaddr,$timestamp,$rsvd1,$rsvd2,$message) = split( /\|/, $line, 5);
+	# backwards compatibility check for 1.0. if no rsvd1 field, must be old.
+	if (!$rsvd2) {
+		$message = $timestamp;
+		$timestamp = "";			
+	}
 	
 	# print the borderline
 	print $message;
@@ -93,7 +118,7 @@ if (!$in)
 	exit(0);
 }
 
-#
+####################################################################################
 # mode=sysop
 #
 # SysOp "view all" mode.  This generates a full HTML page.
@@ -111,7 +136,7 @@ if ($mode eq "sysop")
 	exit(0);
 }
 
-#
+####################################################################################
 # mode=view
 # Thise mode is for showing the borderline listing inline.
 #
@@ -124,7 +149,7 @@ if ($mode eq "view")
 	exit(0);
 }
 
-#
+####################################################################################
 # mode=add
 # List borderlines and allow adding a new one. This generates a full HTML page.
 #
@@ -132,7 +157,7 @@ if ($mode eq "add")
 {
 	&do_top;
 	
-	print "<p align=\"center\">Welcome to Sub-Etha Software's BORDERLINES!</p>\n";
+	print "<p align=\"center\">Welcome to Sub-Etha Software's BORDERLINES $version</p>\n";
 
 	&do_showborderlines;
 	
@@ -146,35 +171,29 @@ if ($mode eq "add")
 	exit(0);
 }
 
+####################################################################################
+# mode=delete
+# id=ID	
 #
-# If we have a message passed in, place it in the borderline file.
-#
-
-# get the user's borderline message
-$message = $in{'message'};
-
-# the format will be something like this:
-#
-# message=This+is+the+message...
-#
-# get rid of invalid stuff from the message
-if ($message) {
-
-	# get rid of trailing carraige return
-	chomp $message;
+if ($mode eq "delete" )
+{
+	$id = $in{'id'};
 	
-	# filter out HTML tags
-	$message =~ s/<[^>]*>//g;
-}
-
-#
-# (continued)
-# okay, NOW see if we have something to put in the file...
-#
-if ($message) {
-
+	if (!$id) {
+		&do_top;
+		print "<p>No ID tag was passed in.  Sorry.</p>\n";
+		&do_end;
+		exit(0);
+	}
+	# try to find and delete the specified borderline.
+	
 	# open data file for read/write
 	if ( open(FILE, "+<$datafile_path") ) {
+
+		# lock file.
+		if ( $flock) {
+			flock(FILE,2) || die("flock() error - unsupported on this server?");
+		}
 
 		@borderlines = <FILE>;
 
@@ -187,11 +206,93 @@ if ($message) {
 	} else {
 		# create a new empty file if we have to
 		open( FILE,"+>$datafile_path") || die ("Unable to create file.\n" );
+
+		# lock file.
+		if ( $flock) {
+			flock(FILE,2) || die("flock() error - unsupported on this server?");
+		}
+	}
+
+	foreach $line ( @borderlines )
+	{
+		chomp( $line );
+		($ipaddr,$timestamp,$rsvd1,$rsvd2,$message) = split( /\|/, $line, 5);
+		
+		# backwards compatibility check for 1.0. if no rsvd1 field, must be old.
+		if (!$rsvd1) {
+			$message = $timestamp;
+			$timestamp = "";			
+		}
+
+		# write back all lines not containing the msg id.
+		if ( $id ne $timestamp ) {
+			print FILE "$line\n";
+		}
 	}
 	
-	# add IP to message
+	# unlock file
+	if ( $flock ) {
+		flock(FILE,8);
+	}
+
+	close(FILE);
+
+	print "Location: $this_script?mode=sysop\n\n";
+	
+	exit(0);
+}
+
+####################################################################################
+# If we have a message passed in, place it in the borderline file.
+#
+
+# get the user's borderline message
+$message = $in{'message'};
+
+#
+# see if we have something to put in the file...
+#
+if ($message) {
+	# get rid of trailing carraige return
+	chomp $message;
+	
+	# filter out HTML tags
+	$message =~ s/<[^>]*>//g;
+
+	# filter out the "|" character
+	$message =~ s/\|/!/g;
+
+
+	# open data file for read/write
+	if ( open(FILE, "+<$datafile_path") ) {
+
+		# lock file.
+		if ( $flock) {
+			flock(FILE,2) || die("flock() error - unsupported on this server?");
+		}
+
+		@borderlines = <FILE>;
+
+		# seek back to start of file
+		seek (FILE,0,0);
+
+		# erase the old junk in the file
+		truncate(FILE,0);
+
+	} else {
+		# create a new empty file if we have to
+		open( FILE,"+>$datafile_path") || die ("Unable to create file.\n" );
+
+		# lock file.
+		if ( $flock) {
+			flock(FILE,2) || die("flock() error - unsupported on this server?");
+		}
+	}
+
+	# add IP and timestamp to message
 	$ip = $ENV{REMOTE_ADDR};
-	$temp = "$ip|$message";
+	$timestamp=time;
+	$temp = "$ip|$timestamp|rsvd1|rsvd2|$message";
 	$message = $temp;
 
 	# add new message to the top
@@ -207,15 +308,27 @@ if ($message) {
 		chomp( $line );
 		print FILE "$line\n";
 	}
+	
+	# unlock file
+	if ( $flock ) {
+		flock(FILE,8);
+	}
+
 	close(FILE);
 }
 
-#
+####################################################################################
 # If here, we don't know why were were called, so just redirect...
 #
 
-# send browser to return page.
-print "Location: $return_URL\n\n";
+# send browser to return page, if one was specified.
+if ($return_URL) {
+	print "Location: $return_URL\n\n";
+} else {
+	&do_top;
+	print "<p>Your borderline has been added.</p>\n";
+	&do_end;	
+}
 	
 exit(0);
 
@@ -239,13 +352,27 @@ sub do_showborderlines
 	$entries = scalar(@borderlines);
 	
 	print "<p>There are $entries borderlines right now:</p>\n";
-	
+
 	$count=0;
 	foreach $line ( @borderlines ) {
 		$count++;
-		($ipaddr,$message) = split( /\|/, $line, 2);
+
+		# get rid of IP address in front of borderline
+		($ipaddr,$timestamp,$rsvd1,$rsvd2,$message) = split( /\|/, $line, 5);
+
+		# backwards compatibility check for 1.0. if no rsvd1 field, must be old.
+		if (!$rsvd2) {
+			$message = $timestamp;
+			$timestamp = "";			
+		}
+
 		print "<div>$count. ";
-		if ( $sysop ) {
+		if ($sysop) {
+			# backwards compatibility with 1.0
+			if ($timestamp) {
+				print "<a href=\"$this_script?mode=delete&id=$timestamp\">(delete)</a> ";
+			}
+
 			print "[$ipaddr] ";
 		}
 		print "$message</div>\n";
@@ -257,7 +384,7 @@ sub do_top
 {
 	print "Content-Type: text/html\n\n";
 
-	print "<html><head><title>Sub-Etha's BORDERLINES...</title><head><body>\n";
+	print "<html><head><title>Sub-Etha's BORDERLINES $version</title><head><body>\n";
 }
 
 sub do_end
